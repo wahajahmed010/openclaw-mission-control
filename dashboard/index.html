@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buck's Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0a0a0f;
+            --card: #12121a;
+            --card-hover: #1a1a25;
+            --green: #00ff9f;
+            --cyan: #00d4ff;
+            --red: #ff4757;
+            --yellow: #ffd93d;
+            --text: #e0e0e0;
+            --dim: #666;
+            --health-score: 100;
+        }
+        @keyframes vignette-green {
+            0%, 100% { opacity: 0.03; }
+            50% { opacity: 0.08; }
+        }
+        @keyframes vignette-yellow {
+            0%, 100% { opacity: 0.05; }
+            50% { opacity: 0.12; }
+        }
+        @keyframes vignette-red {
+            0%, 100% { opacity: 0.08; }
+            50% { opacity: 0.18; }
+        }
+        .vignette {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            transition: background-color 1s ease;
+            animation: vignette-green 4s ease-in-out infinite;
+        }
+        .vignette.yellow {
+            background: radial-gradient(ellipse at center, transparent 40%, rgba(255, 217, 61, var(--health-score, 50)) 100%);
+            animation: vignette-yellow 3s ease-in-out infinite;
+        }
+        .vignette.red {
+            background: radial-gradient(ellipse at center, transparent 30%, rgba(255, 71, 87, var(--health-score, 50)) 100%);
+            animation: vignette-red 2s ease-in-out infinite;
+        }
+        .vignette.green {
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 255, 159, 0.08) 100%);
+            animation: vignette-green 5s ease-in-out infinite;
+        }
+        @keyframes agent-pulse-running {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 159, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(0, 255, 159, 0); }
+        }
+        @keyframes agent-pulse-idle {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102, 102, 102, 0.3); }
+            50% { box-shadow: 0 0 0 4px rgba(102, 102, 102, 0); }
+        }
+        @keyframes agent-pulse-completed {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.3); }
+            50% { box-shadow: 0 0 0 5px rgba(0, 212, 255, 0); }
+        }
+        @keyframes agent-pulse-error {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(255, 71, 87, 0); }
+        }
+        .agent-entry.running { animation: agent-pulse-running 2s ease-in-out infinite; border-radius: 6px; padding: 8px; margin: -2px; }
+        .agent-entry.idle { animation: agent-pulse-idle 3s ease-in-out infinite; }
+        .agent-entry.completed { animation: agent-pulse-completed 3s ease-in-out infinite; }
+        .agent-entry.error { animation: agent-pulse-error 1.5s ease-in-out infinite; border-radius: 6px; padding: 8px; margin: -2px; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .status-header {
+            text-align: center;
+            color: var(--green);
+            font-size: 16px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            padding: 10px 15px;
+            background: var(--card);
+            border-radius: 8px;
+            border: 1px solid #1a1a25;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            text-shadow: 0 0 10px var(--green);
+        }
+        .status-title { color: var(--cyan); font-size: 14px; }
+        .status-divider { color: var(--dim); }
+        .status-item { color: var(--text); }
+        .header-info {
+            text-align: center;
+            color: var(--dim);
+            font-size: 12px;
+            margin-bottom: 20px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .panel {
+            background: var(--card);
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #222;
+            transition: all 0.3s ease;
+        }
+        .panel:hover {
+            border-color: var(--green);
+            box-shadow: 0 0 20px rgba(0, 255, 159, 0.1);
+        }
+        .panel-title {
+            color: var(--cyan);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+        .status-dot.dead { background: var(--red); animation: none; }
+        .status-dot.warn { background: var(--yellow); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 5px var(--green); }
+            50% { opacity: 0.5; box-shadow: 0 0 15px var(--green); }
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #1a1a25;
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: var(--dim); font-size: 11px; }
+        .metric-value { color: var(--green); font-size: 14px; font-weight: bold; }
+        .big-number {
+            font-size: 36px;
+            font-weight: bold;
+            color: var(--green);
+            text-shadow: 0 0 20px var(--green);
+        }
+        .progress-bar {
+            height: 6px;
+            background: #222;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--green), var(--cyan));
+            transition: width 0.5s ease;
+        }
+        /* Service Health Strip */
+        .service-strip {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            justify-content: center;
+            flex-wrap: wrap;
+            padding: 10px 16px;
+            background: var(--card);
+            border-radius: 8px;
+            border: 1px solid #1a1a25;
+            margin-bottom: 15px;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .strip-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .strip-dot {
+            font-size: 10px;
+            line-height: 1;
+        }
+        .strip-dot.alive { color: var(--green); }
+        .strip-dot.dead { color: var(--red); }
+        .strip-dot.warn { color: var(--yellow); }
+        .strip-dot.off { color: var(--dim); }
+        .strip-sep { color: #222; font-size: 12px; }
+
+        .log-entry {
+            font-size: 11px;
+            padding: 4px 0;
+            border-bottom: 1px solid #1a1a25;
+            display: flex;
+            gap: 10px;
+        }
+        .log-time { color: var(--dim); min-width: 60px; }
+        .log-type { color: var(--cyan); min-width: 50px; }
+        .log-msg { color: var(--text); }
+        .log-scroll { max-height: 200px; overflow-y: auto; }
+        .container-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+        }
+        .container-name { color: var(--text); }
+        .container-stats { color: var(--dim); font-size: 11px; }
+        .full-width { grid-column: 1 / -1; }
+        .online-indicator {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--green);
+            margin-right: 8px;
+        }
+        .agent-entry {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #1a1a25;
+        }
+        .agent-entry:last-child { border-bottom: none; }
+        .agent-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+            flex-shrink: 0;
+        }
+        .agent-dot.idle { background: var(--dim); animation: none; }
+        .agent-name {
+            color: var(--cyan);
+            font-size: 16px;
+            font-weight: bold;
+            min-width: 100px;
+        }
+        .agent-status {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: rgba(0, 255, 159, 0.15);
+            color: var(--green);
+        }
+        .agent-status.idle {
+            background: rgba(102, 102, 102, 0.15);
+            color: var(--dim);
+        }
+        .agent-task {
+            color: var(--dim);
+            font-size: 10px;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .agent-time {
+            color: var(--dim);
+            font-size: 10px;
+            min-width: 55px;
+            text-align: right;
+        }
+        .agents-empty {
+            color: var(--dim);
+            font-size: 12px;
+            text-align: center;
+            padding: 15px 0;
+        }
+        .ascii-small {
+            color: var(--green);
+            font-size: 8px;
+            line-height: 1.1;
+            white-space: pre;
+        }
+        .pipeline-task {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px solid #1a1a25;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .pipeline-task:hover {
+            background: rgba(0, 255, 159, 0.04);
+            border-radius: 4px;
+            padding-left: 4px;
+        }
+        .pipeline-task:last-child { border-bottom: none; }
+        .pipeline-task-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+        }
+        .pipeline-task-expanded {
+            display: none;
+            padding: 8px 10px 10px 26px;
+            color: var(--dim);
+            font-size: 11px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: rgba(0,0,0,0.2);
+            border-radius: 0 0 4px 4px;
+            margin-top: -4px;
+            margin-bottom: 4px;
+        }
+        .pipeline-task-expanded.visible {
+            display: block;
+        }
+        .pipeline-task-row.expanded .pipeline-expand-icon {
+            transform: rotate(90deg);
+        }
+        .pipeline-expand-icon {
+            color: var(--dim);
+            font-size: 10px;
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+        .pipeline-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .pipeline-dot.running { background: var(--green); animation: pulse 2s infinite; }
+        .pipeline-dot.pending { background: var(--cyan); }
+        .pipeline-dot.done { background: var(--dim); }
+        .pipeline-dot.failed { background: var(--red); }
+        .pipeline-label {
+            color: var(--text);
+            font-size: 12px;
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pipeline-time {
+            color: var(--dim);
+            font-size: 10px;
+            min-width: 80px;
+            text-align: right;
+        }
+        .pipeline-status-badge {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 2px 5px;
+            border-radius: 3px;
+            min-width: 55px;
+            text-align: center;
+        }
+        .pipeline-status-badge.running { background: rgba(0, 255, 159, 0.15); color: var(--green); }
+        .pipeline-status-badge.pending { background: rgba(0, 212, 255, 0.15); color: var(--cyan); }
+        .pipeline-status-badge.done { background: rgba(102, 102, 102, 0.15); color: var(--dim); }
+        .pipeline-status-badge.failed { background: rgba(255, 71, 87, 0.15); color: var(--red); }
+        .pipeline-section-label {
+            color: var(--dim);
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 8px 0 4px;
+            border-bottom: 1px solid #1a1a25;
+            margin-bottom: 4px;
+        }
+        .pipeline-section-label:first-child { padding-top: 0; }
+        .pipeline-idle { color: var(--dim); font-size: 12px; text-align: center; padding: 15px 0; }
+        .pipeline-error { color: var(--red); font-size: 11px; text-align: center; padding: 10px 0; }
+        /* Action Panel */
+        .action-panel {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 20px auto;
+            max-width: 1400px;
+        }
+        .action-btn {
+            background: var(--card);
+            border: 1px solid #333;
+            color: var(--cyan);
+            padding: 8px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s ease;
+        }
+        .action-btn:hover {
+            border-color: var(--green);
+            color: var(--green);
+            box-shadow: 0 0 15px rgba(0, 255, 159, 0.2);
+        }
+        .action-btn:active { transform: scale(0.97); }
+        .action-btn.danger:hover { border-color: var(--red); color: var(--red); box-shadow: 0 0 15px rgba(255, 71, 87, 0.2); }
+        /* Memory Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: var(--card);
+            border: 1px solid var(--green);
+            border-radius: 10px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(0, 255, 159, 0.15);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #1a1a25;
+        }
+        .modal-title { color: var(--cyan); font-size: 16px; text-transform: uppercase; letter-spacing: 2px; }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--dim);
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+        }
+        .modal-close:hover { color: var(--red); }
+        .modal-body {
+            padding: 15px 20px;
+            overflow-y: auto;
+            max-height: calc(80vh - 60px);
+        }
+        .memory-file {
+            background: #0a0a0f;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #1a1a25;
+        }
+        .memory-file-name { color: var(--green); font-size: 12px; font-weight: bold; margin-bottom: 6px; }
+        .memory-file-path { color: var(--dim); font-size: 10px; margin-bottom: 8px; }
+        .memory-file-content {
+            color: var(--text);
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 120px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+        .memory-empty { color: var(--dim); text-align: center; padding: 30px; font-size: 12px; }
+        footer {
+            text-align: center;
+            color: var(--dim);
+            font-size: 10px;
+            margin-top: 30px;
+            padding: 10px;
+        }
+        .crt-scanlines {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 9998;
+            background: repeating-linear-gradient(
+                to bottom,
+                rgba(0, 0, 0, 0.03) 0px,
+                rgba(0, 0, 0, 0.03) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+        }
+    </style>
+</head>
+<body>
+    <div class="vignette green" id="vignette"></div>
+    <div class="crt-scanlines"></div>
+    <div class="status-header">
+        <span class="status-title">BUCK MISSION CONTROL</span>
+        <span class="status-divider">◆</span>
+        <span class="status-item" id="health_status">NOMINAL</span>
+        <span class="status-divider">|</span>
+        <span class="status-item">SCORE: <span id="health_score">--</span></span>
+        <span class="status-divider">|</span>
+        <span class="status-item"><span id="active_count">0</span> ACTIVE</span>
+        <span class="status-divider">|</span>
+        <span class="status-item" id="header_clock">--:--:--</span>
+    </div>
+
+    <div class="service-strip" id="service_strip">
+        <span style="color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px;">Services</span>
+        <span class="strip-sep">|</span>
+        <span class="strip-item"><span class="strip-dot alive" id="ss_gateway">●</span> Gateway</span>
+        <span class="strip-item"><span class="strip-dot alive" id="ss_ssh">●</span> SSH</span>
+        <span class="strip-item"><span class="strip-dot alive" id="ss_dns">●</span> DNS</span>
+        <span class="strip-item"><span class="strip-dot off" id="ss_adguard">○</span> AdGuard</span>
+        <span class="strip-item"><span class="strip-dot alive" id="ss_docker">●</span> Docker</span>
+        <span class="strip-item"><span class="strip-dot off" id="ss_tailscale">○</span> Tailscale</span>
+    </div>
+
+    <div class="grid">
+        <!-- System Panel -->
+        <div class="panel">
+            <div class="panel-title"><span class="status-dot"></span>System</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div>
+                    <div class="metric-label">CPU Usage</div>
+                    <div class="big-number" id="cpu_percent">--</div>
+                    <div class="metric-label" style="margin-top: 5px;"><span id="cpu_count">--</span> Cores | Load: <span id="cpu_load">--</span></div>
+                </div>
+                <div>
+                    <div class="metric-label">RAM</div>
+                    <div class="big-number" id="ram_percent">--</div>
+                    <div class="metric-label"><span id="ram_used_gb">--</span> / <span id="ram_total_gb">--</span> GB</div>
+                </div>
+            </div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-top: 8px;">--</div>
+        </div>
+
+        <!-- Gateway Panel -->
+            <div class="panel-title"><span class="status-dot" id="gateway_dot"></span>OpenClaw Gateway</div>
+            <div class="metric">
+                <span class="metric-label">Status</span>
+                <span class="metric-value" id="gateway_status">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Version</span>
+                <span class="metric-value" id="gateway_version">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Uptime</span>
+                <span class="metric-value" id="gateway_uptime">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Sessions</span>
+                <span class="metric-value" id="session_count">--</span>
+            </div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-top: 8px;">--</div>
+        </div>
+
+        <!-- Docker Panel -->
+        <div class="panel">
+            <div class="panel-title"><span class="status-dot"></span>Docker</div>
+            <div id="docker_containers">
+                <div class="metric">
+                    <span class="metric-label">Containers</span>
+                    <span class="metric-value" id="container_count">--</span>
+                </div>
+            </div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-top: 8px;">--</div>
+        </div>
+
+        <!-- AdGuard Panel -->
+        <div class="panel">
+            <div class="panel-title"><span class="status-dot" id="adguard_dot"></span>AdGuard Home</div>
+            <div class="metric">
+                <span class="metric-label">Status</span>
+                <span class="metric-value" id="adguard_status">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Version</span>
+                <span class="metric-value" id="adguard_version">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Queries Blocked</span>
+                <span class="metric-value" id="adguard_blocked">--</span>
+            </div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-top: 8px;">--</div>
+        </div>
+
+        <!-- Network Panel -->
+        <div class="panel">
+            <div class="panel-title"><span class="status-dot" id="network_dot"></span>Network</div>
+            <div class="metric">
+                <span class="metric-label">Hostname</span>
+                <span class="metric-value" id="hostname">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">LAN IP</span>
+                <span class="metric-value" id="lan_ip">--</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Internet</span>
+                <span class="metric-value" id="internet_status">--</span>
+            </div>
+        </div>
+
+        <!-- Disk Panel -->
+        <div class="panel">
+            <div class="panel-title"><span class="status-dot"></span>Disk</div>
+            <div class="big-number" id="disk_percent" style="font-size: 28px;">--</div>
+            <div class="progress-bar" style="margin: 10px 0;">
+                <div class="progress-fill" id="disk_bar" style="width: 0%"></div>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Used</span>
+                <span class="metric-value"><span id="disk_used_gb">--</span> GB</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Free</span>
+                <span class="metric-value"><span id="disk_free_gb">--</span> GB</span>
+            </div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-top: 8px;">--</div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="panel full-width">
+            <div class="panel-title"><span class="status-dot"></span>Activity Log</div>
+            <div class="log-scroll" id="activity_log">
+                <div class="log-entry">
+                    <span class="log-time">--:--:--</span>
+                    <span class="log-type">system</span>
+                    <span class="log-msg">Waiting for data...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agents Panel -->
+        <div class="panel full-width">
+            <div class="panel-title"><span class="status-dot" id="agents_dot"></span>Active Agents</div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-bottom: 8px;">--</div>
+            <div id="agents_list">
+                <div class="agent-entry">
+                    <span class="log-time">--:--:--</span>
+                    <span class="agent-name">Loading...</span>
+                </div>
+            </div>
+        </div>
+        <!-- Task Pipeline Panel -->
+        <div class="panel full-width">
+            <div class="panel-title"><span class="status-dot" id="pipeline_dot"></span>Task Pipeline</div>
+            <div class="freshness" style="text-align: right; color: var(--dim); font-size: 10px; margin-bottom: 8px;">--</div>
+            <div id="pipeline_list">
+                <div class="pipeline-idle">Loading pipeline data...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Action Panel -->
+    <div class="action-panel">
+        <button class="action-btn" onclick="refreshAll()">&#8635; Refresh All</button>
+        <button class="action-btn danger" onclick="clearLogs()">&#128465; Clear Logs</button>
+        <button class="action-btn" onclick="viewMemory()">&#128190; View Memory</button>
+    </div>
+
+    <!-- Memory Modal -->
+    <div class="modal-overlay" id="memoryModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span class="modal-title">&#128190; Memory Files</span>
+                <button class="modal-close" onclick="closeMemoryModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="memoryBody">
+                <div class="memory-empty">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Buck's Dashboard | OpenClaw v2026.4.9 | Auto-refresh every 10s
+    </footer>
+
+    <div class="crt-scanlines"></div>
+
+    <script>
+        // Clock
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock') && (document.getElementById('clock').textContent = now.toLocaleTimeString('en-GB'));
+            document.getElementById('date') && (document.getElementById('date').textContent = now.toLocaleDateString('en-GB'));
+            document.getElementById('header_clock') && (document.getElementById('header_clock').textContent = now.toLocaleTimeString('en-GB'));
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+
+        // Metrics fetch
+        let sessionCount = 0;
+
+        async function fetchMetrics() {
+            try {
+                const res = await fetch('/api/metrics');
+                const data = await res.json();
+
+                // System
+                document.getElementById('cpu_percent').textContent = Math.round(data.system.cpu.percent) + '%';
+                document.getElementById('ram_percent').textContent = Math.round(data.system.ram.percent) + '%';
+                document.getElementById('cpu_count').textContent = data.system.cpu.count || '--';
+                document.getElementById('cpu_load').textContent = data.system.cpu.load_1m || '--';
+                document.getElementById('ram_used_gb').textContent = data.system.ram.used_gb || '--';
+                document.getElementById('ram_total_gb').textContent = data.system.ram.total_gb || '--';
+                document.getElementById('disk_used_gb').textContent = data.system.disk.used_gb || '--';
+                document.getElementById('disk_free_gb').textContent = data.system.disk.free_gb || '--';
+                
+                // Update CPU chart
+                cpuHistory.push(data.system.cpu.percent);
+                if (cpuHistory.length > 20) cpuHistory.shift();
+                cpuChart.data.datasets[0].data = [...cpuHistory];
+                cpuChart.update('none');
+
+                // Gateway
+                const gwStatus = data.gateway.status;
+                document.getElementById('gateway_status').textContent = gwStatus.toUpperCase();
+                document.getElementById('gateway_dot').className = 'status-dot ' + (gwStatus === 'alive' ? '' : 'dead');
+                document.getElementById('gateway_version').textContent = data.gateway.version;
+                document.getElementById('gateway_uptime').textContent = data.gateway.uptime_raw ? 'Active' : 'Unknown';
+                
+                // Sessions
+                sessionCount = Array.isArray(data.sessions) ? data.sessions.length : 0;
+                document.getElementById('session_count').textContent = sessionCount;
+
+                // Docker
+                const containers = data.docker.containers || [];
+                document.getElementById('container_count').textContent = containers.length + ' running';
+                
+                // AdGuard
+                const agStatus = data.adguard.running;
+                document.getElementById('adguard_status').textContent = agStatus ? 'RUNNING' : 'STOPPED';
+                document.getElementById('adguard_dot').className = 'status-dot ' + (agStatus ? '' : 'dead');
+                document.getElementById('adguard_upstream').textContent = data.adguard.upstream || '--';
+                document.getElementById('adguard_errors').textContent = data.adguard['dns_errors_100 logs'] || 0;
+
+                // Network
+                document.getElementById('hostname').textContent = data.network.hostname || '--';
+                document.getElementById('lan_ip').textContent = data.network.lan_ip || '--';
+                document.getElementById('internet_status').textContent = data.network.internet || '--';
+                document.getElementById('network_dot').className = 'status-dot ' + (data.network.internet === 'connected' ? '' : 'warn');
+                
+                const load = data.load || {};
+                document.getElementById('load_avg').textContent = 
+                    `${load['1min'] || 0}/${load['5min'] || 0}/${load['15min'] || 0}`;
+
+                // Disk
+                document.getElementById('disk_percent').textContent = Math.round(data.system.disk.percent) + '%';
+                document.getElementById('disk_bar').style.width = data.system.disk.percent + '%';
+
+                // Activity log
+                const logEl = document.getElementById('activity_log');
+                const activities = data.activity || [];
+                logEl.innerHTML = activities.map(a => `
+                    <div class="log-entry">
+                        <span class="log-time">${a.time}</span>
+                        <span class="log-type">${a.type}</span>
+                        <span class="log-msg">${a.msg}</span>
+                    </div>
+                `).join('');
+
+                // Agents panel
+                const agents = data.sessions || [];
+                const agentsDot = document.getElementById('agents_dot');
+                const agentsList = document.getElementById('agents_list');
+                
+                if (agents.length === 0) {
+                    agentsDot.className = 'status-dot dead';
+                    agentsList.innerHTML = '<div class="agents-empty">No active agents</div>';
+                } else {
+                    agentsDot.className = 'status-dot';
+                    agentsList.innerHTML = agents.map(a => `
+                        <div class="agent-entry">
+                            <span class="agent-dot ${a.status === 'idle' ? 'idle' : ''}"></span>
+                            <span class="agent-name">${a.name}</span>
+                            <span class="agent-status ${a.status === 'idle' ? 'idle' : ''}">${a.status}</span>
+                            <span class="agent-task">${a.task_preview || 'No task'}</span>
+                            <span class="agent-time">${a.started || a.ended || '?'}</span>
+                        </div>
+                    `).join('');
+                }
+
+            } catch (err) {
+                console.error('Failed to fetch metrics:', err);
+            }
+        }
+
+        async function fetchMetrics() {
+            try {
+                const res = await fetch('/api/metrics');
+                const data = await res.json();
+
+                // System
+                document.getElementById('cpu_percent').textContent = Math.round(data.system.cpu.percent) + '%';
+                document.getElementById('ram_percent').textContent = Math.round(data.system.ram.percent) + '%';
+                document.getElementById('cpu_count').textContent = data.system.cpu.count || '--';
+                document.getElementById('cpu_load').textContent = data.system.cpu.load_1m || '--';
+                document.getElementById('ram_used_gb').textContent = data.system.ram.used_gb || '--';
+                document.getElementById('ram_total_gb').textContent = data.system.ram.total_gb || '--';
+                document.getElementById('disk_used_gb').textContent = data.system.disk.used_gb || '--';
+                document.getElementById('disk_free_gb').textContent = data.system.disk.free_gb || '--';
+                
+                // Update CPU chart
+                cpuHistory.push(data.system.cpu.percent);
+                if (cpuHistory.length > 20) cpuHistory.shift();
+                cpuChart.data.datasets[0].data = [...cpuHistory];
+                cpuChart.update('none');
+
+                // Gateway
+                const gwStatus = data.gateway.status;
+                document.getElementById('gateway_status').textContent = gwStatus.toUpperCase();
+                document.getElementById('gateway_dot').className = 'status-dot ' + (gwStatus === 'alive' ? '' : 'dead');
+                document.getElementById('gateway_version').textContent = data.gateway.version;
+                document.getElementById('gateway_uptime').textContent = data.gateway.uptime_raw ? 'Active' : 'Unknown';
+                
+                // Sessions
+                sessionCount = Array.isArray(data.sessions) ? data.sessions.length : 0;
+                document.getElementById('session_count').textContent = sessionCount;
+
+                // Docker
+                const containers = data.docker.containers || [];
+                document.getElementById('container_count').textContent = containers.length + ' running';
+                
+                // AdGuard
+                const agStatus = data.adguard.running;
+                document.getElementById('adguard_status').textContent = agStatus ? 'RUNNING' : 'STOPPED';
+                document.getElementById('adguard_dot').className = 'status-dot ' + (agStatus ? '' : 'dead');
+                document.getElementById('adguard_upstream').textContent = data.adguard.upstream || '--';
+                document.getElementById('adguard_errors').textContent = data.adguard['dns_errors_100 logs'] || 0;
+
+                // Network
+                document.getElementById('hostname').textContent = data.network.hostname || '--';
+                document.getElementById('lan_ip').textContent = data.network.lan_ip || '--';
+                document.getElementById('internet_status').textContent = data.network.internet || '--';
+                document.getElementById('network_dot').className = 'status-dot ' + (data.network.internet === 'connected' ? '' : 'warn');
+                
+                const load = data.load || {};
+                document.getElementById('load_avg').textContent = 
+                    `${load['1min'] || 0}/${load['5min'] || 0}/${load['15min'] || 0}`;
+
+                // Disk
+                document.getElementById('disk_percent').textContent = Math.round(data.system.disk.percent) + '%';
+                document.getElementById('disk_bar').style.width = data.system.disk.percent + '%';
+
+                // Activity log
+                const logEl = document.getElementById('activity_log');
+                const activities = data.activity || [];
+                logEl.innerHTML = activities.map(a => `
+                    <div class="log-entry">
+                        <span class="log-time">${a.time}</span>
+                        <span class="log-type">${a.type}</span>
+                        <span class="log-msg">${a.msg}</span>
+                    </div>
+                `).join('');
+
+                // Agents panel
+                const agents = data.sessions || [];
+                const agentsDot = document.getElementById('agents_dot');
+                const agentsList = document.getElementById('agents_list');
+                
+                if (agents.length === 0) {
+                    agentsDot.className = 'status-dot dead';
+                    agentsList.innerHTML = '<div class="agents-empty">No active agents</div>';
+                } else {
+                    agentsDot.className = 'status-dot';
+                    agentsList.innerHTML = agents.map(a => `
+                        <div class="agent-entry ${a.status}">
+                            <span class="agent-dot ${a.status === 'idle' ? 'idle' : ''}"></span>
+                            <span class="agent-name">${a.name}</span>
+                            <span class="agent-status ${a.status === 'idle' ? 'idle' : ''}">${a.status}</span>
+                            <span class="agent-task">${a.task_preview || 'No task'}</span>
+                            <span class="agent-time">${a.started || a.ended || '?'}</span>
+                        </div>
+                    `).join('');
+                }
+
+                // Vignette & health score from services
+                const score = data.services && data.services.score !== undefined ? data.services.score : 100;
+                updateVignette(score);
+
+                // Update slim header
+                document.getElementById('health_score').textContent = score;
+                const weakest = data.services && data.services.weakest;
+                if (score >= 75) {
+                    document.getElementById('health_status').textContent = 'NOMINAL';
+                    document.getElementById('health_status').style.color = 'var(--green)';
+                } else if (score >= 40) {
+                    document.getElementById('health_status').textContent = weakest ? 'DEGRADED (' + weakest.toUpperCase() + ')' : 'DEGRADED';
+                    document.getElementById('health_status').style.color = 'var(--yellow)';
+                } else {
+                    document.getElementById('health_status').textContent = weakest ? 'CRITICAL (' + weakest.toUpperCase() + ')' : 'CRITICAL';
+                    document.getElementById('health_status').style.color = 'var(--red)';
+                }
+
+                // Active task count
+                const pipelineData = window._pipelineCache || {};
+                const activeTasks = (pipelineData.running || []).length + (pipelineData.pending || []).length;
+                document.getElementById('active_count').textContent = activeTasks;
+
+                // Data freshness
+                if (data.last_updated) {
+                    const ts = new Date(data.last_updated);
+                    const timeStr = ts.toLocaleTimeString('en-GB');
+                    document.querySelectorAll('.freshness').forEach(el => el.textContent = 'as of ' + timeStr);
+                }
+
+                // Gateway with latency
+                const gwLatency = data.gateway.latency_ms;
+                if (gwLatency !== undefined && gwLatency !== null) {
+                    document.getElementById('gateway_status').textContent = 'ALIVE (' + gwLatency + 'ms)';
+                }
+
+            } catch (err) {
+                console.error('Failed to fetch metrics:', err);
+            }
+        }
+
+        async function fetchPipeline() {
+            try {
+                const res = await fetch('/api/tasks');
+                const data = await res.json();
+                window._pipelineCache = data;
+                const pipelineDot = document.getElementById('pipeline_dot');
+                const pipelineList = document.getElementById('pipeline_list');
+
+                if (data.error) {
+                    pipelineDot.className = 'status-dot dead';
+                    pipelineList.innerHTML = `<div class="pipeline-error">Error: ${data.error}</div>`;
+                    return;
+                }
+
+                const { running = [], pending = [], completed = [], failed = [] } = data;
+                const hasActivity = running.length > 0 || pending.length > 0 || completed.length > 0 || failed.length > 0;
+
+                if (!hasActivity) {
+                    pipelineDot.className = 'status-dot dead';
+                    pipelineList.innerHTML = '<div class="pipeline-idle">No active tasks — system idle</div>';
+                    return;
+                }
+
+                pipelineDot.className = 'status-dot';
+
+                function buildTaskHtml(task, section) {
+                    const raw = task.task || '';
+                    const label = task.label || 'Unknown task';
+                    const truncated = raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
+                    const outcome = task.terminal_outcome || task.status || 'unknown';
+                    const time = task.ended_at || task.started_at || '?';
+                    const duration = task.duration || '?';
+                    const statusBadgeClass = outcome;
+
+                    return `
+                        <div class="pipeline-task" onclick="toggleExpand(this)">
+                            <div class="pipeline-task-row">
+                                <span class="pipeline-expand-icon">&#9654;</span>
+                                <span class="pipeline-dot ${section}"></span>
+                                <span class="pipeline-label" title="${escapeAttr(raw)}">${escapeHtml(truncated) || escapeHtml(label)}</span>
+                                <span class="pipeline-status-badge ${statusBadgeClass}">${outcome}</span>
+                                <span class="pipeline-time" title="Started: ${task.started_at}">${duration}</span>
+                            </div>
+                            ${raw ? `<div class="pipeline-task-expanded">${escapeHtml(raw)}</div>` : ''}
+                        </div>
+                    `;
+                }
+
+                let html = '';
+
+                if (running.length > 0) {
+                    html += '<div class="pipeline-section-label">Running</div>';
+                    html += running.map(t => buildTaskHtml(t, 'running')).join('');
+                }
+
+                if (pending.length > 0) {
+                    html += '<div class="pipeline-section-label">Queued</div>';
+                    html += pending.map(t => buildTaskHtml(t, 'pending')).join('');
+                }
+
+                if (completed.length > 0) {
+                    html += '<div class="pipeline-section-label">Completed</div>';
+                    html += completed.map(t => buildTaskHtml(t, 'done')).join('');
+                }
+
+                if (failed.length > 0) {
+                    html += '<div class="pipeline-section-label">Failed</div>';
+                    html += failed.map(t => buildTaskHtml(t, 'failed')).join('');
+                }
+
+                pipelineList.innerHTML = html;
+
+            } catch (err) {
+                console.error('Failed to fetch pipeline:', err);
+            }
+        }
+
+        function toggleExpand(el) {
+            const row = el.querySelector('.pipeline-task-row');
+            const expanded = el.querySelector('.pipeline-task-expanded');
+            row.classList.toggle('expanded');
+            if (expanded) expanded.classList.toggle('visible');
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/"/g, '&quot;');
+        }
+
+        fetchMetrics();
+        fetchPipeline();
+        setInterval(fetchMetrics, 10000);
+        setInterval(fetchPipeline, 30000);
+
+        // Vignette & health score update
+        function updateVignette(score) {
+            const v = document.getElementById('vignette');
+            v.className = 'vignette';
+            if (score >= 75) {
+                v.classList.add('green');
+            } else if (score >= 40) {
+                v.classList.add('yellow');
+            } else {
+                v.classList.add('red');
+            }
+            document.documentElement.style.setProperty('--health-score', score);
+        }
+
+        // Action handlers
+        function refreshAll() {
+            fetchMetrics();
+            fetchPipeline();
+        }
+
+        async function clearLogs() {
+            try {
+                const res = await fetch('/api/clear-logs', { method: 'POST' });
+                const d = await res.json();
+                console.log('Logs cleared:', d);
+                fetchMetrics();
+            } catch (e) {
+                console.error('Failed to clear logs', e);
+            }
+        }
+
+        async function viewMemory() {
+            const modal = document.getElementById('memoryModal');
+            const body = document.getElementById('memoryBody');
+            modal.classList.add('active');
+            body.innerHTML = '<div class="memory-empty">Loading...</div>';
+            try {
+                const res = await fetch('/api/memory');
+                const data = await res.json();
+                if (!data.files || data.files.length === 0) {
+                    body.innerHTML = '<div class="memory-empty">No memory files found.</div>';
+                    return;
+                }
+                body.innerHTML = data.files.map(f => `
+                    <div class="memory-file">
+                        <div class="memory-file-name">${f.name}</div>
+                        <div class="memory-file-path">${f.path}</div>
+                        <div class="memory-file-content">${escapeHtml(f.preview)}</div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                body.innerHTML = '<div class="memory-empty">Failed to load memory files.</div>';
+            }
+        }
+
+        function closeMemoryModal() {
+            document.getElementById('memoryModal').classList.remove('active');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modal on overlay click
+        document.getElementById('memoryModal').addEventListener('click', function(e) {
+            if (e.target === this) closeMemoryModal();
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeMemoryModal();
+        });
+    </script>
+</body>
+</html>

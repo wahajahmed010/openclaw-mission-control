@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Docker
+*.dockerignore
+
+# Keys / secrets (keep structure, ignore actual values)
+*.pem
+*.key
+
+# Memory (keep structure, ignore daily logs)
+memory/*.md
+!memory/council-*.md
