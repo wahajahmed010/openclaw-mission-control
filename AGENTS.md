@@ -24,9 +24,60 @@ You wake up fresh each session. These files are your continuity:
 - **Daily notes:** `memory/YYYY-MM-DD.md` (create `memory/` if needed) — raw logs of what happened
 - **Long-term:** `MEMORY.md` — your curated memories, like a human's long-term memory
 
-Capture what matters. Decisions, context, things to remember. Skip the secrets unless asked to keep them.
+### 🆕 New Memory System (Primary)
 
-### 🧠 MEMORY.md - Your Long-Term Memory
+The new memory system at `memory-new/` is the **default**. It uses date-bucketed JSONL + hybrid search (FTS5 + semantic). The old Markdown system is kept for rollback only.
+
+**Feature flag:** `~/.openclaw/memory_mode`
+- `new` → openclaw-memory (hybrid search, JSONL storage) — **default**
+- `legacy` → old grep-based Markdown search
+
+Changing the flag = instant rollback. No reinstall needed.
+
+**Integration:** `openclaw-memory/integrations/buck_adapter.py`
+
+```python
+from openclaw_memory.integrations.buck_adapter import (
+    capture_memory,   # write a memory entry
+    search_memories,  # hybrid search (keyword + semantic)
+    get_session_context,  # rebuild context at session start
+    proactive_recall,     # surface relevant memories before answering
+    get_memory_mode,      # read current flag
+    set_memory_mode,      # set flag (new | legacy)
+)
+```
+
+**Session startup (new system):**
+1. Check `~/.openclaw/memory_mode`
+2. If `new`: read `memory-new/COMPACTION.md` + recent entries via `get_session_context()`
+3. If `legacy`: read `memory/YYYY-MM-DD.md` (old behavior)
+
+### `#mem:` Auto-Capture
+
+Any thought worth remembering gets written immediately — don't wait for end-of-session.
+
+```
+#mem: decided to use PostgreSQL for the auth service, not SQLite
+#mem: wahaj prefers concise replies, no filler
+#mem: today's meeting moved to 3pm
+```
+
+Use `capture_memory(text, tags, type)` for structured entries with tags/types.
+
+### 🔍 Proactive Recall
+
+**Before answering questions about:** past decisions, projects, people, dates, preferences, or prior work — surface relevant memories first.
+
+Use `proactive_recall(current_topic)` to check memory before responding.
+
+Example trigger: "when was the last time we discussed X?" → proactive_recall → then answer.
+
+**When answering a question that touches on prior context:**
+1. Run `search_memories(query, mode="hybrid")` 
+2. If results found, include a brief "## Related Memories" summary in your reply
+3. Then answer the question
+
+### 📝 Write It Down - No "Mental Notes"!
 
 - **ONLY load in main session** (direct chats with your human)
 - **DO NOT load in shared contexts** (Discord, group chats, sessions with other people)
@@ -207,6 +258,100 @@ Think of it like a human reviewing their journal and updating their mental model
 
 The goal: Be helpful without being annoying. Check in a few times a day, do useful background work, but respect quiet time.
 
+### 🧠 MEMORY.md - Your Long-Term Memory (Main Session Only)
+
+- **ONLY load in main session** (direct chats with your human)
+- **DO NOT load in shared contexts** (Discord, group chats, sessions with other people)
+- This is for **security** — contains personal context that shouldn't leak to strangers
+- You can **read, edit, and update** MEMORY.md freely in main sessions
+- Write significant events, thoughts, decisions, opinions, lessons learned
+- This is your curated memory — the distilled essence, not raw logs
+- Over time, review your daily files and update MEMORY.md with what's worth keeping
+
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
+
+---
+
+## 🔧 Auto-Skill Pipeline (Hermes Adaptation Phase 1)
+
+The Auto-Skill Pipeline automatically extracts reusable workflows from subagent executions and promotes them to skills.
+
+### How It Works
+
+1. **Trigger**: After subagent completion, `scripts/auto-skill-trigger.py` evaluates if the task qualifies
+2. **Extract**: A skill-extractor subagent analyzes the transcript and generates `SKILL.md`
+3. **Draft**: Skills land in `skills/auto-draft/` (hidden, testing phase)
+4. **Promote**: After 3 successful re-invocations, skill moves to `skills/auto/`
+5. **Archive**: Drafts unused for 7 days get archived
+
+### Integration
+
+The trigger is wired into the main agent's subagent completion handler. After a subagent completes successfully, the main agent calls `auto-skill-trigger.py` with the result data.
+
+**Method 1: Via JSON file (works with OpenClaw security)**
+```python
+# Write trigger input to temp file
+trigger_input = {
+    "completion_status": "success",
+    "tool_calls": tool_call_count,
+    "transcript_summary": summary,
+    "session_id": session_key
+}
+import json
+with open("/tmp/trigger_input.json", "w") as f:
+    json.dump(trigger_input, f)
+
+# Then execute: python3 scripts/auto-skill-trigger.py /tmp/trigger_input.json
+```
+
+**Method 2: Direct subprocess (requires manual approval)**
+```python
+import subprocess
+result = subprocess.run(
+    ["python3", "/home/wahaj/.openclaw/workspace/scripts/auto-skill-trigger.py"],
+    input=json.dumps(trigger_input),
+    capture_output=True,
+    text=True
+)
+```
+
+### Trigger Conditions
+
+A subagent transcript qualifies if:
+- `completion_status == "success"`
+- `tool_calls >= 3`
+- `complexity_score >= 5`
+
+### Directives
+
+- **`#skill: <name>`** — Manual trigger to extract a skill from the last subagent run
+- **`#skill: force`** — Force extraction even if thresholds not met
+
+### Commands
+
+- **`/skills auto`** — List all promoted auto-generated skills
+- **`/skills drafts`** — List all draft skills in testing
+- **`/skills process`** — Run lifecycle management (promote/archive)
+
+### Directory Structure
+
+```
+skills/
+├── auto-draft/          # Draft skills (hidden, under evaluation)
+│   └── {timestamp}-{hash}/
+│       ├── SKILL.md
+│       └── meta.json
+├── auto/                # Promoted skills (ready to use)
+│   └── {skill-name}/
+│       └── SKILL.md
+├── manual/              # Hand-crafted skills
+└── skill-extractor/      # The extractor skill itself
+    └── SKILL.md
+```
+
+### Files
+
+- `scripts/auto-skill-trigger.py` — Evaluation logic, determines if extraction needed
+- `scripts/skill-lifecycle.py` — Manages draft promotion and archival

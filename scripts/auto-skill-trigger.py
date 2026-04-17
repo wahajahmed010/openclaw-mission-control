@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""
+Auto-Skill Trigger System
+Called after subagent completion to determine if skill extraction is needed.
+"""
+
+import sys
+import json
+import hashlib
+import re
+import os
+from datetime import datetime
+from pathlib import Path
+
+WORKSPACE = Path("/home/wahaj/.openclaw/workspace")
+AUTO_DIR = WORKSPACE / "skills" / "auto"
+DRAFT_DIR = WORKSPACE / "skills" / "auto-draft"
+QUEUE_FILE = WORKSPACE / "scripts" / "skill-extraction-queue.json"
+MAX_QUEUE_SIZE = 50
+
+def sanitize_skill_name(name: str) -> str:
+    """Prevent path traversal and invalid chars."""
+    # Remove any path components
+    name = os.path.basename(name)
+    # Allow only alphanumeric, hyphen, underscore
+    name = re.sub(r'[^a-zA-Z0-9_-]', '-', name)
+    # Limit length
+    return name[:64]
+
+def skill_exists(skill_name: str) -> bool:
+    """Check if skill already in auto/ or auto-draft/."""
+    return (AUTO_DIR / skill_name).exists() or \
+           (DRAFT_DIR / skill_name).exists()
+
+def drain_queue() -> list:
+    """Read and clear queue atomically."""
+    if not QUEUE_FILE.exists():
+        return []
+    try:
+        queue = json.loads(QUEUE_FILE.read_text())
+        # Atomic clear
+        QUEUE_FILE.write_text("[]")
+        return queue
+    except:
+        return []
+
+def process_queue():
+    """Process all queued extractions."""
+    entries = drain_queue()
+    processed = []
+    for entry in entries:
+        if entry.get("should_extract"):
+            # Spawn skill-extractor subagent
+            print(f"Processing: {entry['skill_name']}")
+            processed.append(entry['skill_name'])
+    return {"processed": len(processed), "skills": processed}
+
+# COMPLEXITY_THRESHOLD = 5  # was 5
+COMPLEXITY_THRESHOLD = 4  # was 5
+
+def calculate_complexity(tool_calls: int, has_error_recovery: bool = False, multi_domain: bool = False) -> int:
+    """Calculate task complexity score (0-10)."""
+    # score = min(10, tool_calls // 2)  # 2 tool calls = 1 point, max 5
+    score = min(10, int(tool_calls * 0.7))  # 3 tools → 2 points
+    if has_error_recovery:
+        score += 2
+    if multi_domain:
+        score += 2
+    return min(10, score)
+
+def should_extract_skill(completion_status: str, tool_calls: int, complexity: int) -> dict:
+    """
+    Determine if subagent transcript qualifies for skill extraction.
+    
+    Returns:
+        dict with keys: should_extract (bool), reason (str), skill_name (str)
+    """
+    result = {"should_extract": False, "reason": "", "skill_name": ""}
+    
+    # Must be successful
+    if completion_status != "success":
+        result["reason"] = f"Completion status is '{completion_status}', not 'success'"
+        return result
+    
+    # Must have minimum tool calls
+    if tool_calls < 3:
+        result["reason"] = f"Only {tool_calls} tool calls (minimum 3)"
+        return result
+    
+    # Must meet complexity threshold
+    if complexity < COMPLEXITY_THRESHOLD:
+        result["reason"] = f"Complexity score {complexity} below threshold ({COMPLEXITY_THRESHOLD})"
+        return result
+    
+    result["should_extract"] = True
+    result["reason"] = f"Qualifies: {tool_calls} tools, complexity {complexity}"
+    return result
+
+def generate_skill_name(transcript_summary: str) -> str:
+    """Generate a skill name from transcript summary."""
+    # Extract key action words
+    words = transcript_summary.lower().split()
+    # Filter to meaningful words (skip common stop words)
+    stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"}
+    key_words = [w for w in words if w not in stop_words and len(w) > 2]
+    
+    if len(key_words) >= 2:
+        name = f"{key_words[0]}-{key_words[-1]}"
+    else:
+        name = "-".join(key_words[:2]) if key_words else "unknown-skill"
+    
+    # Add hash to ensure uniqueness
+    hash_str = hashlib.md5(name.encode()).hexdigest()[:6]
+    return f"{name}-{hash_str}"
+
+def main():
+    """
+    Called from main agent after subagent completion.
+    
+    Usage:
+        python3 auto-skill-trigger.py                    # reads from stdin
+        python3 auto-skill-trigger.py /path/to/input.json # reads from file
+    
+    Expected JSON input:
+    {
+        "completion_status": "success" | "failed" | "timeout",
+        "tool_calls": int,
+        "session_id": "...",
+        "transcript_summary": "...",
+        "tags": ["tag1", "tag2"]
+    }
+    """
+    try:
+        # Support both stdin and file input for OpenClaw security compatibility
+        if len(sys.argv) > 1 and sys.argv[1].endswith('.json'):
+            # File path provided (works with OpenClaw exec restrictions)
+            with open(sys.argv[1], 'r') as f:
+                data = json.load(f)
+        else:
+            # Read from stdin (traditional method)
+            data = json.load(sys.stdin)
+    except (json.JSONDecodeError, FileNotFoundError) as e:
+        print(json.dumps({"error": f"Invalid input: {e}"}))
+        sys.exit(1)
+    
+    completion_status = data.get("completion_status", "")
+    tool_calls = data.get("tool_calls", 0)
+    session_id = data.get("session_id", "")
+    transcript_summary = data.get("transcript_summary", "")
+    tags = data.get("tags", [])
+    
+    # Check if manual trigger (via #skill: directive)
+    manual_trigger = data.get("manual_trigger", False)
+    
+    # Calculate complexity
+    complexity = calculate_complexity(
+        tool_calls,
+        has_error_recovery=data.get("has_error_recovery", False),
+        multi_domain=data.get("multi_domain", False)
+    )
+    
+    # Determine if extraction needed
+    qualification = should_extract_skill(completion_status, tool_calls, complexity)
+    
+    if not qualification["should_extract"] and not manual_trigger:
+        print(json.dumps({
+            "action": "skip",
+            "reason": qualification["reason"]
+        }))
+        return
+    
+    # Generate skill name (sanitized to prevent path traversal)
+    skill_name = sanitize_skill_name(
+        data.get("skill_name") or generate_skill_name(transcript_summary)
+    )
+    
+    # Check for existing skill (skip if manual trigger)
+    if skill_exists(skill_name) and not manual_trigger:
+        output = {
+            "action": "skip",
+            "reason": f"Skill '{skill_name}' already exists"
+        }
+        print(json.dumps(output))
+        return
+    
+    # Create output
+    output = {
+        "action": "extract" if qualification["should_extract"] else "manual_extract",
+        "skill_name": skill_name,
+        "session_id": session_id,
+        "tool_calls": tool_calls,
+        "complexity_score": complexity,
+        "timestamp": datetime.now().isoformat(),
+        "trigger_reason": qualification["reason"] if qualification["should_extract"] else "manual"
+    }
+    
+    print(json.dumps(output))
+    
+    # Write to queue for async processing
+    queue = []
+    if QUEUE_FILE.exists():
+        try:
+            queue = json.loads(QUEUE_FILE.read_text())
+        except:
+            queue = []
+    
+    queue.append(output)
+    QUEUE_FILE.write_text(json.dumps(queue, indent=2))
+    
+    # Process queue (drain and spawn extractors)
+    process_queue()
+
+if __name__ == "__main__":
+    main()
