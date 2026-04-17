@@ -45,15 +45,74 @@ def drain_queue() -> list:
         return []
 
 def process_queue():
-    """Process all queued extractions."""
+    """Process all queued extractions by creating DRAFT skills."""
     entries = drain_queue()
     processed = []
+    failed = []
+    
     for entry in entries:
-        if entry.get("should_extract"):
-            # Spawn skill-extractor subagent
-            print(f"Processing: {entry['skill_name']}")
-            processed.append(entry['skill_name'])
-    return {"processed": len(processed), "skills": processed}
+        if entry.get("action") in ["extract", "manual_extract"]:
+            skill_name = entry.get("skill_name")
+            session_id = entry.get("session_id")
+            
+            print(f"Creating DRAFT skill: {skill_name}")
+            
+            # Create DRAFT directory
+            draft_dir = DRAFT_DIR / skill_name
+            try:
+                draft_dir.mkdir(parents=True, exist_ok=False)
+                
+                # Create initial SKILL.md
+                skill_content = f"""# {skill_name.replace('-', ' ').title()}
+
+**Auto-extracted from session:** {session_id}
+**Tool calls:** {entry.get('tool_calls', 0)}
+**Complexity:** {entry.get('complexity_score', 0)}
+**Extracted at:** {entry.get('timestamp', datetime.now().isoformat())}
+
+## When to Use
+
+[To be filled by skill-extractor subagent or manually]
+
+## Procedure
+
+[To be filled]
+
+## Verification
+
+[To be filled]
+
+## Notes
+
+This skill was auto-extracted by the Hermes Adaptation pipeline.
+- Trigger reason: {entry.get('trigger_reason', 'unknown')}
+- Needs 3 successful re-invocations before promotion to ACTIVE
+"""
+                (draft_dir / "SKILL.md").write_text(skill_content)
+                
+                # Create meta.json
+                meta = {
+                    "created": datetime.now().isoformat(),
+                    "source_session": session_id,
+                    "tool_calls": entry.get("tool_calls", 0),
+                    "complexity": entry.get("complexity_score", 0),
+                    "invocations": [],
+                    "status": "DRAFT",
+                    "skill_name": skill_name
+                }
+                (draft_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+                
+                processed.append(skill_name)
+                print(f"✅ Created DRAFT: {skill_name}")
+                
+            except FileExistsError:
+                print(f"⚠️  DRAFT already exists: {skill_name}")
+                failed.append(skill_name)
+            except Exception as e:
+                print(f"❌ Failed to create DRAFT {skill_name}: {e}")
+                failed.append(skill_name)
+    
+    return {"processed": len(processed), "skills": processed, "failed": failed}
 
 # COMPLEXITY_THRESHOLD = 5  # was 5
 COMPLEXITY_THRESHOLD = 4  # was 5
